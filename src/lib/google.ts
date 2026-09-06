@@ -36,7 +36,6 @@ export function authUrl(clientId: string, redirectUri: string, state: string) {
     scope: SCOPES,
     access_type: "offline",
     prompt: "consent",
-    include_granted_scopes: "true",
     state,
   });
   return `https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}`;
