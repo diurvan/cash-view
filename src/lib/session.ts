@@ -14,13 +14,11 @@ export type SessionData = {
   picture?: string | null;
   accessToken: string;
   refreshToken?: string;
-  spreadsheetId?: string;
+  driveFileId?: string;
   spreadsheetName?: string;
-  spreadsheetUrl?: string;
-  spreadsheetTab?: string;
 };
 
-type SessionPayload = Omit<SessionData, "sub"> & { spreadsheetTab?: string; sub?: string };
+type SessionPayload = Omit<SessionData, "sub"> & { sub?: string };
 
 function serialize(payload: SessionPayload): Promise<string> {
   return new SignJWT(payload)
@@ -59,10 +57,8 @@ export async function getSession(): Promise<SessionData | null> {
       picture: payload.picture as string | null | undefined,
       accessToken: payload.accessToken as string,
       refreshToken: payload.refreshToken as string | undefined,
-      spreadsheetId: payload.spreadsheetId as string | undefined,
+      driveFileId: payload.driveFileId as string | undefined,
       spreadsheetName: payload.spreadsheetName as string | undefined,
-      spreadsheetUrl: payload.spreadsheetUrl as string | undefined,
-      spreadsheetTab: payload.spreadsheetTab as string | undefined,
     };
     return data.accessToken ? data : null;
   } catch {

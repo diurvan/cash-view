@@ -1,17 +1,3 @@
-const CURRENCY = process.env.NEXT_PUBLIC_CURRENCY || "PEN";
-
-let cached: Intl.NumberFormat | null = null;
-export function formatMoney(n: number): string {
-  if (!cached) {
-    cached = new Intl.NumberFormat("es", {
-      style: "currency",
-      currency: CURRENCY,
-      maximumFractionDigits: 2,
-    });
-  }
-  return cached.format(n);
-}
-
 export function todayIso(): string {
   const d = new Date();
   const m = String(d.getMonth() + 1).padStart(2, "0");

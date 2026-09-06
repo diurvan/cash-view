@@ -34,6 +34,7 @@ export async function GET(req: NextRequest) {
   const error = params.get("error");
 
   const stateCookie = (await cookies()).get("oauth_state")?.value;
+  const next = (await cookies()).get("oauth_next")?.value;
   const baseUrl = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
 
   if (error || !code) {
@@ -83,5 +84,5 @@ export async function GET(req: NextRequest) {
     refreshToken: tokens.refresh_token,
   });
 
-  return NextResponse.redirect(`${baseUrl}/dashboard`);
+  return NextResponse.redirect(`${baseUrl}${next ?? "/dashboard"}`);
 }

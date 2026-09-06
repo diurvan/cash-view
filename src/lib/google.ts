@@ -1,13 +1,6 @@
-export const SHEETS_SCOPE = "https://www.googleapis.com/auth/spreadsheets";
-export const DRIVE_READONLY_SCOPE = "https://www.googleapis.com/auth/drive.readonly";
+export const DRIVE_FILE_SCOPE = "https://www.googleapis.com/auth/drive.file";
 
-const SCOPES = [
-  SHEETS_SCOPE,
-  DRIVE_READONLY_SCOPE,
-  "openid",
-  "email",
-  "profile",
-].join(" ");
+const SCOPES = [DRIVE_FILE_SCOPE, "openid", "email", "profile"].join(" ");
 
 function required(name: string): string {
   const v = process.env[name];

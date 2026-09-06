@@ -19,7 +19,7 @@ export const metadata: Metadata = {
     template: "%s · cashview",
   },
   description:
-    "Conecta tu Google Sheets y lleva el control de tus ingresos y gastos con consolidados, gráficos e historial.",
+    "Lleva el control de tus ingresos y gastos en un archivo .cvw propio que vive en tu dispositivo o tu nube.",
   applicationName: "cashview",
 };
 

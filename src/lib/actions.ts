@@ -1,9 +1,7 @@
 "use server";
 
-import { redirect } from "next/navigation";
 import { destroySession } from "./session";
 
-export async function logoutAction() {
+export async function disconnectDrive() {
   await destroySession();
-  redirect("/login");
 }

@@ -1,7 +1,6 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
 import {
   PieChart,
   Pie,
@@ -24,7 +23,6 @@ import {
   subcategoriasIngreso,
 } from "@/lib/template";
 import {
-  formatMoney,
   fmtRange,
   lastNDaysRange,
   monthKey,
@@ -33,19 +31,12 @@ import {
   thisYearRange,
   todayIso,
 } from "@/lib/format";
-import { normalizeNumber } from "@/lib/money";
+import { formatInputNumber, formatMoney, parseMoney } from "@/lib/money";
+import { DEFAULT_SETTINGS, formatFecha, getSettings, type AppSettings } from "@/lib/settings";
+import type { LocalRecord, RecordInput } from "@/lib/local-db";
+import { addRecord, deleteRecord, getCatalog, listRecords, updateRecord } from "@/lib/local-db";
 
-type Record = {
-  row: number;
-  fecha: string;
-  tipo: string;
-  categoria: string;
-  subcategoria?: string;
-  descripcion: string;
-  importe: number;
-  cuenta?: string;
-  estado?: string;
-};
+type Record = LocalRecord;
 
 type CatalogData = {
   categorias: { tipo: string; categoria: string }[];
@@ -74,10 +65,10 @@ type RangePreset = "mes" | "30d" | "anio" | "todo" | "custom";
 type Tab = "dashboard" | "detalle";
 
 export function DashboardView() {
-  const router = useRouter();
   const [tab, setTab] = useState<Tab>("dashboard");
   const [records, setRecords] = useState<Record[] | null>(null);
   const [catalog, setCatalog] = useState<CatalogData | null>(null);
+  const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [editing, setEditing] = useState<Record | null>(null);
@@ -87,29 +78,14 @@ export function DashboardView() {
     ...thisMonthRange(),
   }));
 
-  const load = useCallback(
-    async (from?: string, to?: string) => {
-      const q = from && to ? `?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}` : "";
-      const res = await fetch(`/api/sheets/records${q}`);
-      if (res.status === 401) {
-        router.push("/login");
-        return;
-      }
-      if (!res.ok) {
-        const d = await res.json().catch(() => null);
-        if (d?.error?.includes("Primero elige una hoja")) {
-          setRecords([]);
-          setError(null);
-          return;
-        }
-        throw new Error(d?.error ?? "Error al leer");
-      }
-      const d = await res.json();
+  const load = useCallback(async (from?: string, to?: string) => {
+    try {
+      setRecords(await listRecords({ from, to }));
       setError(null);
-      setRecords(d.records);
-    },
-    [router]
-  );
+    } catch (e) {
+      throw e instanceof Error ? e : new Error("Error al leer");
+    }
+  }, []);
 
   const refresh = useCallback(() => load(range.from, range.to), [load, range.from, range.to]);
 
@@ -124,8 +100,11 @@ export function DashboardView() {
         }
       }
     })();
+    const onDataChanged = () => void refresh();
+    window.addEventListener("cvw-data-changed", onDataChanged);
     return () => {
       cancelled = true;
+      window.removeEventListener("cvw-data-changed", onDataChanged);
     };
   }, [refresh]);
 
@@ -133,22 +112,14 @@ export function DashboardView() {
     let cancelled = false;
     (async () => {
       try {
-        const res = await fetch("/api/catalog");
-        if (res.status === 401) {
-          router.push("/login");
-          return;
-        }
-        if (res.ok) {
-          const d = await res.json();
-          if (!cancelled) {
-            setCatalog({
-              categorias: (d.categorias ?? []).map((c: { tipo: string; categoria: string }) => ({
-                tipo: c.tipo,
-                categoria: c.categoria,
-              })),
-              cuentas: (d.cuentas ?? []).map((c: { nombre: string }) => ({ nombre: c.nombre })),
-            });
-          }
+        const c = await getCatalog();
+        const s = await getSettings();
+        if (!cancelled) {
+          setSettings(s);
+          setCatalog({
+            categorias: c.categorias.map(({ tipo, categoria }) => ({ tipo, categoria })),
+            cuentas: c.cuentas.map(({ nombre }) => ({ nombre })),
+          });
         }
       } catch {
         // si el catálogo falla, se usan los valores por defecto
@@ -157,7 +128,14 @@ export function DashboardView() {
     return () => {
       cancelled = true;
     };
-  }, [router]);
+  }, []);
+
+  const money = useMemo(() => (n: number) => formatMoney(n, settings.moneda), [settings.moneda]);
+
+  const fmtDate = useMemo(
+    () => (iso: string) => formatFecha(iso, settings.formatoFecha),
+    [settings.formatoFecha]
+  );
 
   const applyPreset = (preset: Exclude<RangePreset, "custom">) => {
     const r =
@@ -172,18 +150,11 @@ export function DashboardView() {
   };
 
   const save = useCallback(
-    async (input: Record, row?: number) => {
+    async (input: RecordInput, row?: number) => {
       setBusy(true);
       try {
-        const res = await fetch(row ? `/api/sheets/records/${row}` : "/api/sheets/records", {
-          method: row ? "PUT" : "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(input),
-        });
-        if (!res.ok) {
-          const d = await res.json().catch(() => null);
-          throw new Error(d?.error ?? "Error al guardar");
-        }
+        if (row) await updateRecord(row, input);
+        else await addRecord(input);
         setError(null);
         setEditing(null);
         await refresh();
@@ -200,11 +171,7 @@ export function DashboardView() {
     async (row: number) => {
       setBusy(true);
       try {
-        const res = await fetch(`/api/sheets/records/${row}`, { method: "DELETE" });
-        if (!res.ok) {
-          const d = await res.json().catch(() => null);
-          throw new Error(d?.error ?? "Error al eliminar");
-        }
+        await deleteRecord(row);
         setError(null);
         setConfirmDelete(null);
         await refresh();
@@ -373,19 +340,19 @@ export function DashboardView() {
             <div className="rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
               <p className="text-xs text-zinc-500 dark:text-zinc-400">Saldo</p>
               <p className="mt-1 truncate text-base font-semibold tabular-nums text-zinc-900 dark:text-zinc-50 sm:text-lg">
-                {formatMoney(totals.saldo)}
+                {money(totals.saldo)}
               </p>
             </div>
             <div className="rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
               <p className="text-xs text-zinc-500 dark:text-zinc-400">Ingresos</p>
               <p className="mt-1 truncate text-base font-semibold tabular-nums text-emerald-600 dark:text-emerald-400 sm:text-lg">
-                {formatMoney(totals.ingresos)}
+                {money(totals.ingresos)}
               </p>
             </div>
             <div className="rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
               <p className="text-xs text-zinc-500 dark:text-zinc-400">Gastos</p>
               <p className="mt-1 truncate text-base font-semibold tabular-nums text-rose-600 dark:text-rose-400 sm:text-lg">
-                {formatMoney(totals.gastos)}
+                {money(totals.gastos)}
               </p>
             </div>
           </div>
@@ -414,7 +381,7 @@ export function DashboardView() {
                           <Cell key={i} fill={PALETTE[i % PALETTE.length]} />
                         ))}
                       </Pie>
-                      <Tooltip formatter={(v) => formatMoney(Number(v))} />
+                      <Tooltip formatter={(v) => money(Number(v))} />
                     </PieChart>
                   </ResponsiveContainer>
                   <ul className="mt-3 space-y-1">
@@ -428,7 +395,7 @@ export function DashboardView() {
                           {c.name}
                         </span>
                         <span className="tabular-nums text-zinc-800 dark:text-zinc-100">
-                          {formatMoney(c.value)}
+                          {money(c.value)}
                         </span>
                       </li>
                     ))}
@@ -449,7 +416,7 @@ export function DashboardView() {
                     <CartesianGrid strokeDasharray="3 3" stroke="#e4e4e7" />
                     <XAxis dataKey="mes" tick={{ fontSize: 11 }} />
                     <YAxis tick={{ fontSize: 10 }} width={34} />
-                    <Tooltip formatter={(v) => formatMoney(Number(v))} />
+                    <Tooltip formatter={(v) => money(Number(v))} />
                     <Legend wrapperStyle={{ fontSize: 12 }} />
                     <Bar dataKey="ingresos" fill={COLOR_INGRESO} radius={[4, 4, 0, 0]} />
                     <Bar dataKey="gastos" fill={COLOR_GASTO} radius={[4, 4, 0, 0]} />
@@ -469,6 +436,7 @@ export function DashboardView() {
             catsIngreso={categoriasIngreso}
             catsGasto={categoriasGasto}
             cuentas={cuentasDisponibles}
+            money={money}
           />
 
           {editing && (
@@ -479,6 +447,7 @@ export function DashboardView() {
               catsIngreso={categoriasIngreso}
               catsGasto={categoriasGasto}
               cuentas={cuentasDisponibles}
+              money={money}
               onCancel={() => setEditing(null)}
               onSubmit={(input) => save(input, editing.row)}
             />
@@ -524,7 +493,7 @@ export function DashboardView() {
                         {r.descripcion || r.categoria || "Sin descripción"}
                       </p>
                       <p className="text-xs text-zinc-500 dark:text-zinc-400">
-                        {r.fecha}
+                        {fmtDate(r.fecha)}
                         <span className="mx-1.5">·</span>
                         {r.categoria}
                         {r.subcategoria && (
@@ -552,7 +521,7 @@ export function DashboardView() {
                         }`}
                       >
                         {isExpense ? "-" : "+"}
-                        {formatMoney(r.importe)}
+                        {money(r.importe)}
                       </span>
                       {confirmDelete === r.row ? (
                         <span className="flex items-center gap-1">
@@ -610,14 +579,15 @@ function QuickAdd({
   catsIngreso,
   catsGasto,
   cuentas,
+  money,
 }: {
   onSaved: () => Promise<void>;
   busy: boolean;
   catsIngreso: string[];
   catsGasto: string[];
   cuentas: string[];
+  money: (n: number) => string;
 }) {
-  const router = useRouter();
   const [fecha, setFecha] = useState(todayIso());
   const [tipo, setTipo] = useState<"Gasto" | "Ingreso">("Gasto");
   const [categoria, setCategoria] = useState(catsGasto[0] ?? "");
@@ -636,12 +606,10 @@ function QuickAdd({
   };
 
   const submit = async () => {
-    const value = normalizeNumber(importe);
+    const value = parseMoney(importe);
     if (!fecha || value <= 0) return;
-    const ok = await fetch("/api/sheets/records", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
+    try {
+      await addRecord({
         fecha,
         tipo,
         categoria: effectiveCategoria,
@@ -649,21 +617,14 @@ function QuickAdd({
         cuenta: effectiveCuenta,
         estado: "Hecho",
         importe: value,
-      }),
-    }).then(async (res) => {
-      if (res.status === 401) {
-        router.push("/login");
-        return false;
-      }
-      if (!res.ok) throw new Error((await res.json().catch(() => null))?.error ?? "Error al guardar");
-      return true;
-    });
-    if (ok) {
+      });
       setImporte("");
       setDescripcion("");
       await onSaved();
       setSaved(true);
       setTimeout(() => setSaved(false), 1600);
+    } catch {
+      // el error global lo muestra el DashboardView
     }
   };
 
@@ -697,15 +658,11 @@ function QuickAdd({
       <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-[1fr_auto_auto_auto_auto] sm:items-end">
         <label className="block sm:col-span-1">
           <span className="mb-1 block text-xs text-zinc-500 dark:text-zinc-400">Importe</span>
-          <input
-            type="number"
-            inputMode="decimal"
-            min="0"
-            step="0.01"
-            placeholder="0.00"
+          <MoneyField
             value={importe}
-            onChange={(e) => setImporte(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && submit()}
+            onChange={setImporte}
+            onEnter={() => void submit()}
+            money={money}
             className={`${inputCls} text-base font-semibold tabular-nums`}
             autoFocus
           />
@@ -734,7 +691,7 @@ function QuickAdd({
           <span className="mb-1 hidden text-xs sm:block">&nbsp;</span>
           <button
             onClick={submit}
-            disabled={busy || !importe}
+            disabled={busy || parseMoney(importe) <= 0}
             className={`h-11 w-full rounded-xl px-5 text-sm font-medium text-white transition active:scale-[0.99] disabled:opacity-50 ${
               saved
                 ? "bg-zinc-500"
@@ -767,6 +724,7 @@ function RecordForm({
   catsIngreso,
   catsGasto,
   cuentas,
+  money,
   onCancel,
   onSubmit,
 }: {
@@ -775,6 +733,7 @@ function RecordForm({
   catsIngreso: string[];
   catsGasto: string[];
   cuentas: string[];
+  money: (n: number) => string;
   onCancel: () => void;
   onSubmit: (input: Record) => void;
 }) {
@@ -785,7 +744,7 @@ function RecordForm({
   const [descripcion, setDescripcion] = useState(initial.descripcion);
   const [cuenta, setCuenta] = useState(initial.cuenta ?? cuentas[0] ?? "");
   const [estado, setEstado] = useState(initial.estado ?? "Hecho");
-  const [importe, setImporte] = useState(String(initial.importe));
+  const [importe, setImporte] = useState(formatInputNumber(initial.importe));
 
   const isIngreso = tipo.toLowerCase().includes("ingreso");
   const cats = isIngreso ? catsIngreso : catsGasto;
@@ -802,7 +761,7 @@ function RecordForm({
   };
 
   const submit = () => {
-    const value = normalizeNumber(importe);
+    const value = parseMoney(importe);
     if (!fecha || !tipo || value === 0) return;
     onSubmit({
       row: initial.row,
@@ -851,14 +810,11 @@ function RecordForm({
         </label>
         <label className="block">
           <span className="mb-1 block text-xs text-zinc-500 dark:text-zinc-400">Importe</span>
-          <input
-            type="number"
-            inputMode="decimal"
-            min="0"
-            step="0.01"
-            placeholder="0.00"
+          <MoneyField
             value={importe}
-            onChange={(e) => setImporte(e.target.value)}
+            onChange={setImporte}
+            onEnter={submit}
+            money={money}
             className={`${inputCls} tabular-nums`}
           />
         </label>
@@ -898,12 +854,59 @@ function RecordForm({
         </button>
         <button
           onClick={submit}
-          disabled={busy}
+          disabled={busy || parseMoney(importe) === 0}
           className="inline-flex h-11 items-center rounded-xl bg-emerald-600 px-5 text-sm font-medium text-white transition hover:bg-emerald-700 active:scale-[0.99] disabled:opacity-60"
         >
           {busy ? "Guardando…" : "Guardar cambios"}
         </button>
       </div>
+    </div>
+  );
+}
+
+// Campo de importe que acepta cualquier separador (1250, 1250,50, 1.250,50,
+// 1,250.50) y muestra en vivo el valor equivalente con la moneda elegida.
+function MoneyField({
+  value,
+  onChange,
+  onEnter,
+  money,
+  className,
+  autoFocus,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  onEnter: () => void;
+  money: (n: number) => string;
+  className?: string;
+  autoFocus?: boolean;
+}) {
+  const [focused, setFocused] = useState(false);
+  const parsed = parseMoney(value);
+
+  return (
+    <div>
+      <input
+        type="text"
+        inputMode="decimal"
+        placeholder="0,00"
+        value={value}
+        autoFocus={autoFocus}
+        onChange={(e) => onChange(e.target.value)}
+        onFocus={() => setFocused(true)}
+        onBlur={() => setFocused(false)}
+        onKeyDown={(e) => e.key === "Enter" && onEnter()}
+        className={className}
+      />
+      {focused && value.trim() !== "" && (
+        <span
+          className={`mt-1 block text-[11px] tabular-nums ${
+            parsed > 0 ? "text-zinc-400 dark:text-zinc-500" : "text-rose-500 dark:text-rose-400"
+          }`}
+        >
+          {parsed > 0 ? `= ${money(parsed)}` : "Importe no válido"}
+        </span>
+      )}
     </div>
   );
 }

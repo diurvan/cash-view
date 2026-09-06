@@ -1,17 +1,18 @@
 import Link from "next/link";
-import { redirect } from "next/navigation";
+import { FileManager } from "@/components/file-manager";
+import { AppSettings } from "@/components/app-settings";
 import { CatalogManager } from "@/components/catalog-manager";
-import { getSession } from "@/lib/session";
 
 export const metadata = {
   title: "Categorías y cuentas · cashview",
 };
 
-export default async function CatalogPage() {
-  const session = await getSession();
-  if (!session) redirect("/login");
-  if (!session.spreadsheetId) redirect("/sheets");
-
+export default async function CatalogPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ error?: string }>;
+}) {
+  const { error } = await searchParams;
   return (
     <main className="min-h-screen bg-zinc-50 pb-24 dark:bg-zinc-950">
       <header className="sticky top-0 z-10 border-b border-zinc-200 bg-white/80 px-4 py-3 backdrop-blur dark:border-zinc-800 dark:bg-zinc-950/80 sm:px-6">
@@ -27,17 +28,25 @@ export default async function CatalogPage() {
           </Link>
           <div className="text-center">
             <h1 className="text-base font-semibold tracking-tight text-zinc-900 dark:text-zinc-50">
-              Categorías y cuentas
+              Archivo y catálogo
             </h1>
             <p className="text-xs text-zinc-500 dark:text-zinc-400">
-              {session.spreadsheetName ?? "Tu hoja"}
+              Tu base .cvw, categorías y cuentas
             </p>
           </div>
           <span className="w-16" />
         </div>
       </header>
 
-      <section className="mx-auto max-w-2xl px-4 py-6 sm:px-6">
+      <section className="mx-auto max-w-2xl space-y-5 px-4 py-6 sm:px-6">
+        {error === "noconfig" && (
+          <p className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-300">
+            La copia en Google Drive no está configurada: faltan GOOGLE_CLIENT_ID/SECRET en el
+            servidor. La app funciona igual con tu archivo local .cvw.
+          </p>
+        )}
+        <FileManager />
+        <AppSettings />
         <CatalogManager />
       </section>
     </main>
