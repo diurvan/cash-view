@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import type { ReactNode } from "react";
 import { Geist, Geist_Mono } from "next/font/google";
 import { ServiceWorker } from "@/components/service-worker";
+import { InstallBanner } from "@/components/install-banner";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -47,6 +48,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
       <body className="min-h-full flex flex-col">
         {children}
         <ServiceWorker />
+        <InstallBanner />
       </body>
     </html>
   );
